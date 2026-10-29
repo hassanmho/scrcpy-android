@@ -24,6 +24,7 @@ An Android-to-Android scrcpy client. Control and mirror any Android device from 
 - **mDNS discovery** — auto-detect nearby devices advertising ADB over WiFi
 - **Device info** — shows model name and Android version per saved device
 - **Remote controls** — floating panel with Back/Home/Recents, power, wake, lock, swipe-to-unlock, volume, mute, media keys, screenshot, rotate, notification/quick-settings panels, text typing, and optional forwarding of your volume keys
+- **Always connected + call alerts** — a background service keeps the link to a device alive (auto-reconnects) and shows its incoming calls as notifications here, with Answer / Decline / Silence / Hang up. Call audio stays on the remote device — ADB can't route call audio
 - **Self-connection** — connect the device to itself (great for Samsung DeX and desktop mode use cases)
 
 ---

@@ -43,6 +43,9 @@ import org.json.JSONObject
 import tech.devline.scropy_ui.adb.AdbAuthHelper
 import tech.devline.scropy_ui.adb.AdbConnection
 import tech.devline.scropy_ui.adb.AdbPairing
+import tech.devline.scropy_ui.link.RemoteLinkService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import tech.devline.scropy_ui.ui.theme.ScropyTheme
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
@@ -281,6 +284,21 @@ suspend fun resolveAdbPortViaMdns(
     }
 }
 
+/**
+ * Ask once to exempt the app from battery optimization, so Android doesn't
+ * cut the background link while this device sleeps.
+ */
+private fun askToIgnoreBatteryOptimizations(context: Context) {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    if (pm.isIgnoringBatteryOptimizations(context.packageName)) return
+    runCatching {
+        @android.annotation.SuppressLint("BatteryLife")
+        val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(android.net.Uri.parse("package:${context.packageName}"))
+        context.startActivity(intent)
+    }
+}
+
 // --- Device metadata ---------------------------------------------------------
 
 suspend fun fetchDeviceMetadata(
@@ -462,6 +480,11 @@ fun DeviceListScreen(
     var pendingConn by remember { mutableStateOf<AdbConnection?>(null) }
     var showInfoDialog by remember { mutableStateOf(false) }
     var editingDevice by remember { mutableStateOf<SavedDevice?>(null) }
+    val link by RemoteLinkService.state.collectAsState()
+    // The link still runs without it, but call alerts need notifications.
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
 
     Scaffold(
         topBar = {
@@ -557,7 +580,10 @@ fun DeviceListScreen(
                                         enabled = connectingId == null,
                                     ) { Text("Edit") }
                                     TextButton(
-                                        onClick = { deleteDevice(prefs, device.id); devices = loadDevices(prefs) },
+                                        onClick = {
+                                            if (link.host == device.host) RemoteLinkService.stop(ctx)
+                                            deleteDevice(prefs, device.id); devices = loadDevices(prefs)
+                                        },
                                         enabled = connectingId == null,
                                     ) { Text("X") }
                                 }
@@ -637,6 +663,38 @@ fun DeviceListScreen(
                                             modifier = Modifier.weight(1f).padding(start = 4.dp),
                                         ) { Text("Shell") }
                                     }
+                                }
+                                // ── Background link: stay connected + call alerts ──
+                                val linkedHere = link.host == device.host
+                                Spacer(Modifier.height(4.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "Always connected + call alerts",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Switch(
+                                        checked = linkedHere,
+                                        onCheckedChange = { on ->
+                                            if (on) {
+                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                    notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                                }
+                                                askToIgnoreBatteryOptimizations(ctx)
+                                                RemoteLinkService.start(ctx, device.host, device.port, device.model ?: device.name)
+                                            } else {
+                                                RemoteLinkService.stop(ctx)
+                                            }
+                                        },
+                                    )
+                                }
+                                if (linkedHere) {
+                                    Text(
+                                        link.status,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (link.connected) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }

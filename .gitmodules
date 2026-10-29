@@ -1,0 +1,3 @@
+[submodule "app/src/main/cpp/boringssl"]
+	path = app/src/main/cpp/boringssl
+	url = https://github.com/google/boringssl.git

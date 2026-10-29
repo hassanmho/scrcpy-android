@@ -354,6 +354,7 @@ class StreamActivity : ComponentActivity() {
     private fun disconnectAll() {
         decodeJob?.cancel()
         audioJob?.cancel()
+        controlSender?.close()
         videoDecoder?.stop()
         audioPlayer?.stop()
         session?.close()

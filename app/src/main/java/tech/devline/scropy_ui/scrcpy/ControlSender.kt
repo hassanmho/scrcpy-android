@@ -5,15 +5,24 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import tech.devline.scropy_ui.adb.AdbStream
 import java.io.IOException
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 private const val TAG = "ControlSender"
 
 /**
  * Serializes and sends scrcpy control messages to the device.
  *
- * All methods are thread-safe (writes are synchronised on [stream]).
+ * All methods are thread-safe and never block on the network: messages are
+ * serialized on the caller's thread (MotionEvents are recycled after
+ * dispatch) and written, in order, from a background thread.
  */
 class ControlSender(private val stream: AdbStream) {
+
+    private val sendQueue: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "scrcpy-control").apply { isDaemon = true }
+    }
 
     // Device display dimensions — updated when session info is known
     @Volatile var deviceWidth:  Int = 0
@@ -125,11 +134,22 @@ class ControlSender(private val stream: AdbStream) {
 
     // ─── Private ─────────────────────────────────────────────────────────────
 
+    /** Stop sending; queued messages are dropped. */
+    fun close() {
+        sendQueue.shutdownNow()
+    }
+
     private fun send(data: ByteArray) {
         try {
-            stream.write(data)
-        } catch (e: IOException) {
-            Log.w(TAG, "Control send failed: ${e.message}")
+            sendQueue.execute {
+                try {
+                    stream.write(data)
+                } catch (e: IOException) {
+                    Log.w(TAG, "Control send failed: ${e.message}")
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // Sender already closed — the session is going away
         }
     }
 

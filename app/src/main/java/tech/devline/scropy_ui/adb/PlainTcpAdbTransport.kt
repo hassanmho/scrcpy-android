@@ -6,6 +6,8 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.NoRouteToHostException
 import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * ADB transport over a plain TCP socket — the classic `adb tcpip 5555` mode.
@@ -14,6 +16,10 @@ import java.net.Socket
  * Wireless debugging / pairing before Android 11), and what any newer device
  * uses after `adb tcpip <port>`. No TLS: just the ADB protocol with RSA AUTH,
  * exactly like USB.
+ *
+ * Writes always run on a dedicated thread: callers include the UI thread
+ * (touch events, closing streams), and Android throws
+ * NetworkOnMainThreadException for socket I/O there.
  */
 class PlainTcpAdbTransport private constructor(private val socket: Socket) : AdbTransport {
 
@@ -50,11 +56,19 @@ class PlainTcpAdbTransport private constructor(private val socket: Socket) : Adb
         null
     }
 
+    private val writer: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "adb-tcp-writer").apply { isDaemon = true }
+    }
+
     override fun write(data: ByteArray): Boolean = try {
-        output.write(data)
-        output.flush()
-        true
-    } catch (_: IOException) {
+        writer.submit<Boolean> {
+            output.write(data)
+            output.flush()
+            true
+        }.get()
+    } catch (_: Exception) {
+        // IOException from the socket (wrapped in ExecutionException), or the
+        // writer was already shut down by close()
         false
     }
 
@@ -64,6 +78,7 @@ class PlainTcpAdbTransport private constructor(private val socket: Socket) : Adb
     }
 
     override fun close() {
+        writer.shutdownNow()
         runCatching { socket.close() }
     }
 }
